@@ -1,0 +1,17 @@
+{
+    "name": "malamalca/fiscal-php",
+    "description": "PHP implementacija fiskalnih blagajn",
+    "type": "PHP Class",
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/malamalca/xmlseclibs.git"
+        }
+    ],
+    "require": {
+        "php": ">=5.3",
+        "robrichards/xmlseclibs": "dev-dev-malamalca",
+        "aferrandini/phpqrcode": "^1.0"
+    },
+    "minimum-stability": "dev"
+}
