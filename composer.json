@@ -10,7 +10,7 @@
     ],
     "require": {
         "php": ">=5.3",
-        "robrichards/xmlseclibs": "malamalca",
+        "robrichards/xmlseclibs": "dev-master",
         "aferrandini/phpqrcode": "^1.0"
     }
 }
