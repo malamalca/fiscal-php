@@ -12,5 +12,11 @@
         "php": ">=5.3",
         "robrichards/xmlseclibs": "dev-malamalca",
         "aferrandini/phpqrcode": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Malamalca\\FiscalPHP\\": "src"
+        },
+        "files": ["fiscal.php"]
     }
 }
