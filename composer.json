@@ -1,22 +1,28 @@
 {
     "name": "malamalca/fiscal-php",
     "description": "PHP implementacija fiskalnih blagajn",
-    "type": "PHP Class",
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "https://github.com/malamalca/xmlseclibs.git"
-        }
-    ],
+    "type": "library",
     "require": {
-        "php": ">=5.3",
-        "robrichards/xmlseclibs": "dev-malamalca",
-        "aferrandini/phpqrcode": "^1.0"
+        "php": "^8.4",
+        "ext-curl": "*",
+        "ext-dom": "*",
+        "ext-openssl": "*",
+        "robrichards/xmlseclibs": "^4.0",
+        "ext-gd": "*",
+        "phpseclib/phpseclib": "^3.0",
+        "endroid/qr-code": "^6.1"
+    },
+    "scripts": {
+        "test": ["@php tests/dependencies.php", "@php tests/qr-endroid.php"]
     },
     "autoload": {
         "psr-4": {
-            "Malamalca\\FiscalPHP\\": "src"
+            "Malamalca\\FiscalPHP\\": "src",
+            "PHPQRCode\\": "src/Compatibility/"
         },
         "files": ["fiscal.php"]
+    },
+    "require-dev": {
+        "khanamiryan/qrcode-detector-decoder": "^2.0"
     }
 }

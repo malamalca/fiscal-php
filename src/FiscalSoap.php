@@ -114,7 +114,7 @@ class FiscalSoap
     */
     public function sendEcho($message)
     {
-        if ($response = $this->doRequest('echo', sprintf($this->ECHO_TEMPLATE, $message))) {
+        if ($response = $this->doRequest('echo', sprintf($this->ECHO_TEMPLATE, htmlspecialchars($message, ENT_XML1 | ENT_QUOTES, 'UTF-8')))) {
             if ($this->hasError($response) === false) {
                 return $this->elementValue($response, 'EchoResponse');
             }
@@ -135,7 +135,7 @@ class FiscalSoap
     public function sendPremise($xml)
     {
         if ($response = $this->sendPremiseRaw($xml)) {
-            return $this->hasError($response) === false;
+            return $this->hasError($response) === false && $this->elementValue($response, 'BusinessPremiseResponse') !== false;
         }
     }
     
@@ -164,75 +164,96 @@ class FiscalSoap
     */
     public function hasError($xml)
     {
-        return strpos($xml, 'Error>') !== false;
+        try {
+            $doc = FiscalUtils::parseXml($xml);
+        } catch (Exception $e) {
+            return true;
+        }
+        $xpath = new \DOMXPath($doc);
+        $xpath->registerNamespace('soap', 'http://schemas.xmlsoap.org/soap/envelope/');
+        $xpath->registerNamespace('fu', 'http://www.fu.gov.si/');
+        $body = $xpath->query('/soap:Envelope/soap:Body')->item(0);
+        return $body === null
+            || $xpath->query('.//fu:Error | .//soap:Fault', $body)->length > 0
+            || $xpath->query('./fu:EchoResponse | ./fu:InvoiceResponse | ./fu:BusinessPremiseResponse', $body)->length !== 1;
     }
-    
     /**
     * @param string $xml Response XML
     * @param string $elementName XML Element Name
     */
     private function elementValue($xml, $elementName)
     {
-        $ret = false;
-        $elementPos = strpos($xml, $elementName . '>');
-        if ($elementPos !== false) {
-            $elementPos += strlen($elementName) + 1;
-            $ret = substr($xml, $elementPos, strpos($xml, '</', $elementPos) - $elementPos);
-        }
-        return $ret;
+        $doc = FiscalUtils::parseXml($xml);
+        $xpath = new \DOMXPath($doc);
+        $xpath->registerNamespace('soap', 'http://schemas.xmlsoap.org/soap/envelope/');
+        $xpath->registerNamespace('fu', 'http://www.fu.gov.si/');
+        $paths = [
+            'EchoResponse' => '/soap:Envelope/soap:Body/fu:EchoResponse',
+            'BusinessPremiseResponse' => '/soap:Envelope/soap:Body/fu:BusinessPremiseResponse',
+            'UniqueInvoiceID' => '/soap:Envelope/soap:Body/fu:InvoiceResponse/fu:UniqueInvoiceID',
+        ];
+        $nodes = $xpath->query($paths[$elementName]);
+        return $nodes->length === 1 ? $nodes->item(0)->textContent : false;
     }
-    
     /**
     * @param string $action Curl action.
     * @param string $xml XML body.
     */
-    private function doRequest($action, $xml)
+    protected function doRequest($action, $xml)
     {
-        if (!$privateKey = FiscalUtils::p12ToPem($this->p12, $this->password)) {
-            throw new Exception('ERROR: Cannot parse P12');
-            return false;
+        $privateKey = false;
+        $ca = false;
+        try {
+            $privateKey = FiscalUtils::p12ToPem($this->p12, $this->password);
+            if ($privateKey === false) {
+                throw new Exception('ERROR: Cannot parse P12');
+            }
+            $ca = FiscalUtils::cerToPem($this->cert);
+            if ($ca === false) {
+                throw new Exception('ERROR: Cannot parse CA Info');
+            }
+            $conn = curl_init();
+            curl_setopt_array($conn, [
+                CURLOPT_URL => $this->url,
+                CURLOPT_CONNECTTIMEOUT_MS => 3000,
+                CURLOPT_TIMEOUT_MS => 3000,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: text/xml; charset=utf-8',
+                    'Cache-Control: no-cache',
+                    'Pragma: no-cache',
+                    'SOAPAction: /' . $action,
+                ],
+                CURLOPT_POSTFIELDS => $xml,
+                CURLOPT_SSLVERSION => CURL_SSLVERSION_TLSv1_2,
+                CURLOPT_SSL_VERIFYHOST => 2,
+                CURLOPT_SSL_VERIFYPEER => true,
+                CURLOPT_SSLCERT => $privateKey,
+                CURLOPT_SSLCERTPASSWD => $this->password,
+                CURLOPT_CAINFO => $ca,
+            ]);
+            $response = curl_exec($conn);
+            if ($response === false) {
+                throw new Exception('CODECURL: ' . curl_error($conn));
+            }
+            $status = curl_getinfo($conn, CURLINFO_HTTP_CODE);
+            if ($status < 200 || $status >= 300) {
+                throw new Exception('HTTP error: ' . $status);
+            }
+            if ($response === '') {
+                throw new Exception('Empty response from fiscal service.');
+            }
+            return $response;
+        } finally {
+            // Release the cURL handle before removing files, including on Windows.
+            unset($conn);
+            if ($privateKey !== false) {
+                unlink($privateKey);
+            }
+            if ($ca !== false) {
+                unlink($ca);
+            }
         }
-        if (!$ca = FiscalUtils::cerToPem($this->cert, $this->password)) {
-            throw new Exception('ERROR: Cannot parse CA Info');
-            return false;
-        }
-        
-        $header = array(
-                "Content-Type: text/xml; charset=utf-8",
-                "Cache-Control: no-cache",
-                "Pragma: no-cache",
-                "SOAPAction: /" . $action
-        );
-        $conn = curl_init();
-        $settings = array(
-            CURLOPT_URL => $this->url,
-            CURLOPT_FRESH_CONNECT => true,
-            CURLOPT_CONNECTTIMEOUT_MS => 3000,
-            CURLOPT_TIMEOUT_MS => 3000,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => 1,
-            CURLOPT_HTTPHEADER => $header,
-            CURLOPT_POSTFIELDS => $xml,
-            CURLOPT_SSLVERSION => CURL_SSLVERSION_TLSv1,
-            CURLOPT_SSL_VERIFYHOST => 2,
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_SSLCERT => $privateKey,
-            CURLOPT_SSLCERTPASSWD => $this->password,
-            CURLOPT_CAINFO => $ca
-        );
-        curl_setopt_array($conn, $settings);
-        
-        $ret = false;
-        if ($rawResponse = curl_exec($conn)) {
-            $ret = $rawResponse;
-        } else {
-            throw new Exception('CODECURL: ' . curl_error($conn));
-        }
-        
-        // cleanup temp files
-        unlink($privateKey);
-        unlink($ca);
-        
-        return $ret;
     }
 }

@@ -44,37 +44,86 @@ use Exception;
  
 class FiscalUtils
 {
-    /**
-    * @param string $p12 Path to clients .P12 store
-    * @param string|null $password Clients private key password
-    */
+    /** Read PKCS#12 credentials without writing private keys to disk. */
+    public static function readP12($p12, $password = null)
+    {
+        if (!is_file($p12) || !is_readable($p12)) {
+            return false;
+        }
+        $contents = file_get_contents($p12);
+        if ($contents === false || !openssl_pkcs12_read($contents, $certInfo, $password ?? '')) {
+            return false;
+        }
+        return $certInfo;
+    }
+
+    /** The caller owns the returned temporary file and must delete it. */
     public static function p12ToPem($p12, $password = null)
     {
-        $ret = false;
-        if (openssl_pkcs12_read(file_get_contents($p12), $cert_info, $password)) {
-            $ret = sys_get_temp_dir() . '/' . uniqid('cer') . '.pem';
-            file_put_contents($ret, $cert_info['pkey'] . $cert_info['cert'] . implode('', $cert_info['extracerts']) );
+        $certInfo = self::readP12($p12, $password);
+        if ($certInfo === false) {
+            return false;
         }
-        return $ret;
+        return self::writeTemporaryPem($certInfo['pkey'] . $certInfo['cert'] . implode('', $certInfo['extracerts'] ?? []));
     }
-    
-    /**
-    * @param string $cer Path to clients .cer file
-    */
+
+    /** Accept either a DER certificate or a PEM certificate/CA bundle. */
     public static function cerToPem($cer)
     {
-        $ret = false;
-        if ($caContents = file_get_contents($cer)) {
-            $caPemContent = 
-                '-----BEGIN CERTIFICATE-----' . PHP_EOL .
-                chunk_split(base64_encode($caContents), 64, PHP_EOL) .
-                '-----END CERTIFICATE-----' . PHP_EOL;
-            
-            $ret = sys_get_temp_dir() . '/' . uniqid('ca') . '.pem';
-            file_put_contents($ret, $caPemContent);
+        if (!is_file($cer) || !is_readable($cer)) {
+            return false;
         }
-
-        return $ret;
+        $contents = file_get_contents($cer);
+        if ($contents === false || $contents === '') {
+            return false;
+        }
+        if (strpos($contents, '-----BEGIN CERTIFICATE-----') === false) {
+            $contents = "-----BEGIN CERTIFICATE-----\n" . chunk_split(base64_encode($contents), 64, "\n") . "-----END CERTIFICATE-----\n";
+        }
+        if (!preg_match_all('/-----BEGIN CERTIFICATE-----\s*([A-Za-z0-9+\/=\s]+)-----END CERTIFICATE-----/', $contents, $matches)) {
+            return false;
+        }
+        foreach ($matches[0] as $certificate) {
+            if (openssl_x509_read($certificate) === false) {
+                return false;
+            }
+        }
+        return self::writeTemporaryPem($contents);
     }
-    
+
+    private static function writeTemporaryPem($contents)
+    {
+        $file = tempnam(sys_get_temp_dir(), 'fiscal-');
+        if ($file === false) {
+            return false;
+        }
+        $written = false;
+        try {
+            $written = file_put_contents($file, $contents) === strlen($contents);
+            return $written ? $file : false;
+        } finally {
+            if (!$written) {
+                unlink($file);
+            }
+        }
+    }
+
+    /** Parse XML without external resources or document type declarations. */
+    public static function parseXml($xml)
+    {
+        if (!is_string($xml) || trim($xml) === '') {
+            throw new Exception('Empty XML document.');
+        }
+        $previous = libxml_use_internal_errors(true);
+        try {
+            $doc = new \DOMDocument();
+            if (!$doc->loadXML($xml, LIBXML_NONET) || $doc->doctype !== null) {
+                throw new Exception('Invalid XML document or unsupported DOCTYPE.');
+            }
+            return $doc;
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+    }
 }

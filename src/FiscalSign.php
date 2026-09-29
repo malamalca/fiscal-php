@@ -58,9 +58,6 @@ class FiscalSign
     /** @var string */
     private $idPropertyName = 'Id';
     
-    /** @var string */
-    private $idPropertyValue = 'data';
-    
     /**
     * @param string $prefix
     */
@@ -94,29 +91,63 @@ class FiscalSign
     {
         $ret = false;
         
-        $doc = new DOMDocument();
-        $doc->loadXML($xml);
+        $doc = FiscalUtils::parseXml($xml);
          
         $xpath = new DOMXPath($doc);
-        if ($nodeset = $xpath->query("//" . $signingNode)->item(0)) {
+        if (!preg_match('/^(?:[A-Za-z_][A-Za-z0-9_.-]*:)?[A-Za-z_][A-Za-z0-9_.-]*$/D', $signingNode)) {
+            throw new Exception('Invalid signing element name.');
+        }
+        $xpath->registerNamespace('fu', 'http://www.fu.gov.si/');
+        if (strpos($signingNode, ':') !== false) {
+            $prefix = explode(':', $signingNode, 2)[0];
+            if ($prefix !== 'fu' && $doc->documentElement->lookupNamespaceURI($prefix) === null) {
+                throw new Exception('Unknown signing namespace prefix.');
+            }
+        }
+        $nodes = $xpath->query('//' . $signingNode);
+        if ($nodes === false || $nodes->length > 1) {
+            throw new Exception('Signing element must be unambiguous.');
+        }
+        if ($nodeset = $nodes->item(0)) {
+            $id = $nodeset->getAttribute($this->idPropertyName);
+            if ($id !== '') {
+                foreach ($xpath->query('//*[@Id]') as $element) {
+                    if (!$element->isSameNode($nodeset) && $element->getAttribute('Id') === $id) {
+                        throw new Exception('Duplicate signing Id.');
+                    }
+                }
+            }
+            if ($nodeset->getElementsByTagNameNS(XMLSecurityDSig::XMLDSIGNS, 'Signature')->length > 0) {
+                throw new Exception('Request is already signed.');
+            }
             $objXMLSecDSig = new XMLSecurityDSig('');
             $objXMLSecDSig->setCanonicalMethod(XMLSecurityDSig::C14N);  
             $objXMLSecDSig->addReference($nodeset, 
                 XMLSecurityDSig::SHA256,
                 ['http://www.w3.org/2000/09/xmldsig#enveloped-signature'], 
-                ['id_name' => $this->idPropertyName, 'uri' => $this->idPropertyValue, 'overwrite' => false]
+                ['id_name' => $this->idPropertyName, 'overwrite' => false]
             );
              
-            openssl_pkcs12_read(file_get_contents($this->p12), $raw, $this->password);
+            if (($raw = FiscalUtils::readP12($this->p12, $this->password)) === false) {
+                throw new Exception('Cannot read PKCS#12 signing certificate.');
+            }
              
             $objKey = new XMLSecurityKey(XMLSecurityKey::RSA_SHA256, ['type' => 'private']);
             $objKey->loadKey($raw['pkey']);
              
             $objXMLSecDSig->sign($objKey, $nodeset);
             $objXMLSecDSig->add509Cert($raw['cert'], true, false, 
-                ['issuerSerial' => true, 'subjectName' => true, 'issuerCertificate' => false]
+                ['issuerSerial' => true, 'subjectName' => true]
             );
          
+            // FURS identifies the certificate by subject, issuer and decimal serial.
+            // Upstream xmlseclibs always embeds it; omit it as the former fork did.
+            $signatureXPath = new DOMXPath($doc);
+            $signatureXPath->registerNamespace('ds', XMLSecurityDSig::XMLDSIGNS);
+            foreach ($signatureXPath->query('./ds:KeyInfo/ds:X509Data/ds:X509Certificate', $objXMLSecDSig->sigNode) as $certificate) {
+                $certificate->parentNode->removeChild($certificate);
+            }
+
             $ret = $doc->saveXML();
         }
         
@@ -131,14 +162,12 @@ class FiscalSign
     {
         $ret = false;
         
-        if ($tmpPemFile = FiscalUtils::p12ToPem($this->p12, $this->password)) {
-            if ($key = openssl_pkey_get_private('file://' . realpath($tmpPemFile), $this->password)) {
-                openssl_sign($data, $signature, $key, OPENSSL_ALGO_SHA256);
-                openssl_free_key($key);
+        if (($raw = FiscalUtils::readP12($this->p12, $this->password)) !== false) {
+            $key = openssl_pkey_get_private($raw['pkey']);
+            if ($key !== false && openssl_sign($data, $signature, $key, OPENSSL_ALGO_SHA256)) {
                 $ret = md5($signature);
             }
         }
-        
         return $ret;
     }
     

@@ -40,6 +40,6 @@
  */
  
 $fiscal_srcdir = dirname(__FILE__) . '/src/';
-require $fiscal_srcdir . '/FiscalUtils.php';
-require $fiscal_srcdir . '/FiscalSoap.php';
-require $fiscal_srcdir . '/FiscalSign.php';
+require_once $fiscal_srcdir . '/FiscalUtils.php';
+require_once $fiscal_srcdir . '/FiscalSoap.php';
+require_once $fiscal_srcdir . '/FiscalSign.php';
