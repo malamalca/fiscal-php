@@ -44,8 +44,7 @@ On Windows, OpenSSL may need `OPENSSL_CONF` set to your installation's
 
 The historical `.phpt` examples use an old PKCS#12 fixture whose encryption is
 unsupported by the default OpenSSL 3 providers. They are not part of this
-offline test command. Live FURS acceptance has not been verified; use current
-test credentials and server certificates for an integration check.
+offline test command. Live FURS acceptance was verified on 2026-09-29 using a current external test certificate; see the live-test section below.
 
 ## Reliability fixes
 
@@ -64,10 +63,7 @@ test credentials and server certificates for an integration check.
 
 `composer test` includes transport simulations for failure handling and cleanup;
 these do not establish live FURS acceptance or verify FURS response signatures.
-The bundled client certificate expired on 2020-08-25. The live Echo attempts
-failed during TLS negotiation; a valid client test certificate and a successful
-integration run are still required. PEM handling is fixed, but the cause of the
-observed TLS failures has not been conclusively established.
+The bundled historical client certificate expired on 2020-08-25. A live run with a valid external certificate and current CA bundle succeeded on 2026-09-29.
 
 ## FURS QR generation with Endroid
 
@@ -113,3 +109,24 @@ UPN payment example and is not a FURS fiscal QR example.
 `php tests/qr-endroid.php` checks these software requirements with E_ALL enabled.
 The decoder is a development-only dependency. `composer test` runs this together
 with all fiscal signing and transport regression checks.
+
+## Live FURS test
+
+On 2026-09-29 the test endpoint accepted Echo, a new test business premise and
+a signed invoice for test tax number 10039953. Both signed responses were verified
+using the public FURS test signing certificate, with matching request MessageIDs.
+The invoice QR was generated and independently decoded.
+
+- Test premise: `FP260929123035CC4D`
+- Test invoice: `FP260929123035CC4D-TEST1-1`
+- EOR: `99994840-5f3d-4371-845e-fae989652a27`
+
+To repeat, set `FISCAL_TEST_P12` to an external FURS test certificate path and
+`FISCAL_TEST_PASSWORD` in the process environment, then run `php tests/live.php --send`.
+This command creates a new premise and invoice in the **test** environment on
+each run. It is excluded from `composer test`. Reports, request/response XML and
+QR images are saved under ignored `tests/live-output/`. No password or client
+private key is saved there. The fixture currently expects tax number 10039953.
+Public CA and FURS signing certificates are under `tests/certificates/` and must
+be refreshed when their issuers rotate them. Live testing requires development
+dependencies for the independent QR decoder.
