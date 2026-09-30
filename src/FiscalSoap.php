@@ -59,6 +59,9 @@ class FiscalSoap
     /** @var string */
     private $url = 'https://blagajne-test.fu.gov.si:9002/v1/cash_registers';
     
+    /** @var int Total request timeout in milliseconds */
+    private $timeoutMs = 3000;
+    
     /**
     * @param string $prefix
     */
@@ -79,6 +82,15 @@ class FiscalSoap
     public function setUrl($url)
     {
         $this->url = $url;
+        return $this;
+    }
+    
+    /**
+    * @param int $milliseconds Total request timeout (the connection timeout stays 3 s).
+    */
+    public function setTimeout($milliseconds)
+    {
+        $this->timeoutMs = max(1, (int) $milliseconds);
         return $this;
     }
     
@@ -216,7 +228,7 @@ class FiscalSoap
             curl_setopt_array($conn, [
                 CURLOPT_URL => $this->url,
                 CURLOPT_CONNECTTIMEOUT_MS => 3000,
-                CURLOPT_TIMEOUT_MS => 3000,
+                CURLOPT_TIMEOUT_MS => $this->timeoutMs,
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_POST => true,
                 CURLOPT_HTTPHEADER => [
